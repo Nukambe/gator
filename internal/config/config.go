@@ -37,8 +37,7 @@ func Read() (Config, error) {
 	return config, nil
 }
 
-func (cfg Config) SetUser(username string) error {
-	cfg.CurrentUserName = username
+func (cfg Config) write() error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("unable to marshal json: %w", err)
@@ -50,6 +49,14 @@ func (cfg Config) SetUser(username string) error {
 	err = os.WriteFile(file, data, 777)
 	if err != nil {
 		return fmt.Errorf("unable to write to file: %w", err)
+	}
+	return nil
+}
+
+func (cfg Config) SetUser(username string) error {
+	cfg.CurrentUserName = username
+	if err := cfg.write(); err != nil {
+		return fmt.Errorf("unable to write file: %w", err)
 	}
 	return nil
 }
