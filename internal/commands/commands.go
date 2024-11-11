@@ -5,6 +5,7 @@ import (
 	"fmt"
 	cfg "github.com/Nukambe/gator/internal/config"
 	"github.com/Nukambe/gator/internal/database"
+	"github.com/Nukambe/gator/internal/rss"
 	"github.com/google/uuid"
 	"time"
 )
@@ -43,12 +44,25 @@ func (c *Commands) Run(s *State, cmd Command) error {
 	return nil
 }
 
+func (s *State) getCurrentUser() (database.User, error) {
+	user, errUser := s.Db.GetUser(context.Background(), s.Config.CurrentUserName)
+	if errUser != nil {
+		return database.User{}, fmt.Errorf("unable to retrieve user: %w", errUser)
+	}
+	return user, nil
+}
+
 func InitCommands() Commands {
 	commands := Commands{cmds: map[string]commandHandler{}}
 	commands.register("login", handlerLogin)
 	commands.register("register", handlerRegister)
 	commands.register("reset", handlerReset)
 	commands.register("users", handleUsers)
+	commands.register("agg", handleAgg)
+	commands.register("addfeed", handleAddFeed)
+	commands.register("feeds", handleFeeds)
+	commands.register("follow", handleFollow)
+	commands.register("following", handleFollowing)
 	return commands
 }
 
@@ -121,6 +135,129 @@ func handleUsers(s *State, cmd Command) error {
 		} else {
 			fmt.Println()
 		}
+	}
+	return nil
+}
+
+// aggregate
+func handleAgg(s *State, cmd Command) error {
+	feed, err := rss.FetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	if err != nil {
+		return fmt.Errorf("unable to fetch feed: %w", err)
+	}
+	fmt.Println(*feed)
+	return nil
+}
+
+// add feed
+func handleAddFeed(s *State, cmd Command) error {
+	if len(cmd.Args) < 2 {
+		return fmt.Errorf("'add feed' requires two arguments")
+	}
+	name := cmd.Args[0]
+	url := cmd.Args[1]
+
+	// get user
+	user, errUser := s.getCurrentUser()
+	if errUser != nil {
+		return fmt.Errorf("unable to retrieve user: %w", errUser)
+	}
+
+	// get feed
+	_, errFeed := rss.FetchFeed(context.Background(), url)
+	if errFeed != nil {
+		return fmt.Errorf("unable to fetch feed: %w", errFeed)
+	}
+
+	// save feed
+	feed, err := s.Db.CreateFeed(context.Background(), database.CreateFeedParams{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      name,
+		Url:       url,
+		UserID:    user.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("unable to create feed: %w", err)
+	}
+
+	// follow feed
+	if err = handleFollow(s, Command{
+		Name: cmd.Name,
+		Args: []string{feed.Url},
+	}); err != nil {
+		return err
+	}
+
+	fmt.Println(feed)
+	return nil
+}
+
+// list feeds
+func handleFeeds(s *State, cmd Command) error {
+	feeds, err := s.Db.GetAllFeeds(context.Background())
+	if err != nil {
+		return fmt.Errorf("unable to retrieve feeds: %w", err)
+	}
+
+	fmt.Println("Feeds:")
+	for _, feed := range feeds {
+		fmt.Printf("	* '%s' %s - %s\n", feed.FeedName, feed.FeedUrl, feed.UserName)
+	}
+	return nil
+}
+
+// follow feed
+func handleFollow(s *State, cmd Command) error {
+	if len(cmd.Args) < 1 {
+		return fmt.Errorf("follow requires one argument")
+	}
+	url := cmd.Args[0]
+
+	// get user
+	user, errUser := s.getCurrentUser()
+	if errUser != nil {
+		return fmt.Errorf("unable to retrieve user: %w", errUser)
+	}
+
+	// get feed
+	feed, errFeed := s.Db.GetFeedByUrl(context.Background(), url)
+	if errFeed != nil {
+		return fmt.Errorf("unable to retrieve feed by url: %w", errFeed)
+	}
+
+	// save follow
+	follow, err := s.Db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    user.ID,
+		FeedID:    feed.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("unable to create feed follow: %w", err)
+	}
+
+	fmt.Printf("%s followed %s\n", follow.UserName, follow.FeedName)
+	return nil
+}
+
+// list following
+func handleFollowing(s *State, cmd Command) error {
+	// get user
+	user, errUser := s.getCurrentUser()
+	if errUser != nil {
+		return fmt.Errorf("unable to retrieve user: %w", errUser)
+	}
+
+	// get follows
+	follows, err := s.Db.GetFeedFollowsForUser(context.Background(), user.Name)
+	if err != nil {
+		return fmt.Errorf("unable to retreive feed_follows: %w", err)
+	}
+
+	fmt.Println("Following:")
+	for _, follow := range follows {
+		fmt.Printf("	* %s\n", follow.FeedName)
 	}
 	return nil
 }
