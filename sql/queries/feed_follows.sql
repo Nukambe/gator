@@ -15,3 +15,9 @@ from feed_follows ff
 join users u on ff.user_id = u.id
 join feeds f on ff.feed_id = f.id
 where u.name = $1;
+
+-- name: DeleteFeedFollowByUserIdAndURL :exec
+delete
+from feed_follows ff
+using feeds f
+where ff.user_id = $1 and f.url = $2;
